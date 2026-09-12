@@ -179,7 +179,11 @@ async function main() {
 
   if (out.status !== 200 || !out.json) {
     const msg = out.json?.error || `HTTP ${out.status}`;
-    if (out.status >= 400 && out.status < 500) {
+    if (out.status === 404 || out.status === 405) {
+      // Not "refused": there is nothing at that path. Either `api` points
+      // somewhere else, or this endpoint is not deployed there yet.
+      notice(`No Preflight batch endpoint at ${api.replace(/\/$/, "")}/api/preflight/batch (HTTP ${out.status}). Nothing checked; not failing the build.`);
+    } else if (out.status >= 400 && out.status < 500) {
       // A 4xx is OUR request being wrong, which is worth seeing and still not a
       // reason to redden someone's build over their dependencies.
       warn(`Sato Hub Preflight refused the request: ${msg}`);
