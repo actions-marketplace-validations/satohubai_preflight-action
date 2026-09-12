@@ -1,0 +1,88 @@
+name: "Sato Preflight"
+description: "Run Sato Hub Preflight over your dependency manifest: what is on record for each package, printed as a table and annotated in the diff. Never a safety verdict."
+author: "Sato Hub"
+
+branding:
+  icon: "check-circle"
+  color: "green"
+
+inputs:
+  manifest:
+    description: "Path to the dependency manifest to check. package.json or requirements.txt."
+    required: false
+    default: "package.json"
+  manifest-kind:
+    description: "Force the manifest kind: package.json or requirements.txt. Empty = inferred from the filename."
+    required: false
+    default: ""
+  packages:
+    description: "Extra package names to check, newline- or comma-separated. Checked alongside the manifest."
+    required: false
+    default: ""
+  repos:
+    description: "GitHub repositories (owner/name or URLs) to check, newline- or comma-separated."
+    required: false
+    default: ""
+  endpoints:
+    description: "https MCP endpoints to check. These are the only inputs that cause a live probe, and only because you typed them here — nothing in your manifest is ever contacted."
+    required: false
+    default: ""
+  agents:
+    description: "ERC-8004 agent references (<chain>:<id>, e.g. base:42) to check, newline- or comma-separated."
+    required: false
+    default: ""
+  fail_on:
+    description: "no (default) | caution | none. The verdict that makes this step exit non-zero. `unknown` never fails a build at any setting."
+    required: false
+    default: "no"
+  annotations:
+    description: "Emit GitHub annotations on the manifest lines. true (default) or false."
+    required: false
+    default: "true"
+  api:
+    description: "Sato Hub API base URL."
+    required: false
+    default: "https://satohub.ai"
+
+outputs:
+  verdict:
+    description: "The most severe verdict in the run: no | caution | go | unknown."
+    value: ${{ steps.run.outputs.verdict }}
+  go:
+    description: "Count of targets with verdict go."
+    value: ${{ steps.run.outputs.go }}
+  caution:
+    description: "Count of targets with verdict caution."
+    value: ${{ steps.run.outputs.caution }}
+  no:
+    description: "Count of targets with verdict no."
+    value: ${{ steps.run.outputs.no }}
+  unknown:
+    description: "Count of targets Sato Hub holds no record of. Informational — never a failure."
+    value: ${{ steps.run.outputs.unknown }}
+  total:
+    description: "Number of targets checked."
+    value: ${{ steps.run.outputs.total }}
+  sarif:
+    description: "Path to the written SARIF log, for actions/upload-sarif."
+    value: ${{ steps.run.outputs.sarif }}
+  report:
+    description: "The markdown report written to the job summary."
+    value: ${{ steps.run.outputs.report }}
+
+runs:
+  using: "composite"
+  steps:
+    - id: run
+      shell: bash
+      env:
+        INPUT_MANIFEST: ${{ inputs.manifest }}
+        INPUT_MANIFEST-KIND: ${{ inputs.manifest-kind }}
+        INPUT_PACKAGES: ${{ inputs.packages }}
+        INPUT_REPOS: ${{ inputs.repos }}
+        INPUT_ENDPOINTS: ${{ inputs.endpoints }}
+        INPUT_AGENTS: ${{ inputs.agents }}
+        INPUT_FAIL_ON: ${{ inputs.fail_on }}
+        INPUT_ANNOTATIONS: ${{ inputs.annotations }}
+        INPUT_API: ${{ inputs.api }}
+      run: node "${{ github.action_path }}/src/main.mjs"

@@ -1,0 +1,13 @@
+{
+  "name": "preflight-action-fixture",
+  "private": true,
+  "description": "A manifest the dogfood workflow checks. Real, published names — a mix of things Sato Hub indexes and things it does not, so the run exercises every verdict.",
+  "dependencies": {
+    "solana-agent-kit": "^1.0.0",
+    "@coinbase/agentkit": "^0.2.0",
+    "viem": "^2.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

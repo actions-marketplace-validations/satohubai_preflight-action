@@ -1,0 +1,57 @@
+name: dogfood
+
+# The action runs on its own repo, every push and once a week. If Preflight is
+# broken, or the batch endpoint changes shape, this is where it shows first.
+#
+# fail_on: none throughout — this repo checks OTHER people's projects, and a
+# verdict about one of them must never be able to redden our own CI. That is the
+# same promise the action makes to everyone who installs it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dogfood:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preflight a package.json fixture
+        id: pkg
+        uses: ./
+        with:
+          manifest: test/fixtures/package.json
+          fail_on: none
+
+      - name: Preflight a requirements.txt fixture
+        id: reqs
+        uses: ./
+        with:
+          manifest: test/fixtures/requirements.txt
+          fail_on: none
+
+      - name: Preflight explicit targets, no manifest
+        id: explicit
+        uses: ./
+        with:
+          manifest: "false"
+          packages: "solana-agent-kit, express"
+          repos: "coinbase/agentkit"
+          fail_on: none
+
+      - name: Show outputs
+        run: |
+          echo "package.json      → verdict=${{ steps.pkg.outputs.verdict }} total=${{ steps.pkg.outputs.total }} unknown=${{ steps.pkg.outputs.unknown }}"
+          echo "requirements.txt  → verdict=${{ steps.reqs.outputs.verdict }} total=${{ steps.reqs.outputs.total }}"
+          echo "explicit          → verdict=${{ steps.explicit.outputs.verdict }} total=${{ steps.explicit.outputs.total }}"
+
+      - name: Assertions against the live endpoint
+        run: node test/run.mjs
