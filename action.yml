@@ -1,5 +1,5 @@
 name: "Sato Preflight"
-description: "Run Sato Hub Preflight over your dependency manifest: what is on record for each package, printed as a table and annotated in the diff. Never a safety verdict."
+description: "Preflight for your dependency manifest: what Sato Hub has on record per package, as a table and diff annotations."
 author: "Sato Hub"
 
 branding:
