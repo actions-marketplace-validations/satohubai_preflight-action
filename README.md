@@ -58,6 +58,51 @@ you type on purpose — reach a live probe.
 | `fail_on` | `no` | `no` · `caution` · `none`. Which verdict exits non-zero. |
 | `annotations` | `true` | Emit annotations on the manifest lines. |
 | `api` | `https://satohub.ai` | API base URL. |
+| `custody` | `true` | On `pull_request`, run Sato Check diff mode (below). `false` to skip. |
+| `github-token` | `${{ github.token }}` | Posts one sticky PR comment. Needs `pull-requests: write`; without it the report goes to the job summary only. |
+| `fail-on` | — | Alias for `fail_on`. Both accept a comma list; add `key_egress_observed` to fail when Sato Check saw a planted key leave. |
+
+---
+
+## Sato Check diff mode (v1.1)
+
+On a pull request, the action reads only what the PR **adds or changes**:
+
+- `package.json` `dependencies` / `devDependencies` added or re-versioned (against the base branch),
+- `mcpServers` blocks added or changed in `.mcp.json` or `claude_desktop_config.json`,
+- `SKILL.md` files under `skills/` or `.claude/skills/` (listed as changed; a local skill file is not a registry install, so there is no record to read for it).
+
+It sends them as one install command / config to `POST https://satohub.ai/api/check/install`
+and writes the four answers per dependency — *Does it take your key? Does your key
+leave? Can it move funds on its own? What changed?* — to the job summary and to one
+sticky PR comment that is updated on every push.
+
+A profile describes what Sato Hub read and ran, with dates. It is not a safety
+rating, an audit or an endorsement, and "not found" is not "not there".
+
+**It fails open.** An unreachable API, a shallow clone, a missing token or an
+answer of `unknown` is reported and never fails the job. The only failure is the
+one you opt into: `fail_on: no,key_egress_observed` fails when a planted key was
+seen leaving during one of Sato Hub's runs for a dependency the PR brings in.
+
+```yaml
+name: preflight
+on: [pull_request]
+permissions:
+  contents: read
+  pull-requests: write   # for the sticky comment; optional
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # diff mode compares against the base branch
+      - uses: satohubai/preflight-action@v1
+        with:
+          manifest: package.json
+          fail_on: none,key_egress_observed
+```
 
 Up to **50 targets** per run. Over the cap the API refuses rather than
 truncating — a clean summary over a silent subset would be believed.
