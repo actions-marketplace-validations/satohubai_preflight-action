@@ -32,9 +32,21 @@ inputs:
     required: false
     default: ""
   fail_on:
-    description: "no (default) | caution | none. The verdict that makes this step exit non-zero. `unknown` never fails a build at any setting."
+    description: "Comma list. One of no (default) | caution | none — the Preflight verdict that makes this step exit non-zero — plus, optionally, key_egress_observed: fail only when Sato Check saw a planted key leave during a run for a dependency the PR adds or changes. `unknown` never fails a build at any setting."
     required: false
     default: "no"
+  fail-on:
+    description: "Alias for fail_on; the two are merged."
+    required: false
+    default: ""
+  custody:
+    description: "true (default) | false. On pull_request events, run Sato Check over the dependencies, MCP config servers and skill files the PR adds or changes, and report the four custody answers."
+    required: false
+    default: "true"
+  github-token:
+    description: "Token used to post one sticky PR comment with the Sato Check report. Needs `pull-requests: write`; without it the report goes to the job summary only."
+    required: false
+    default: ${{ github.token }}
   annotations:
     description: "Emit GitHub annotations on the manifest lines. true (default) or false."
     required: false
@@ -69,6 +81,12 @@ outputs:
   report:
     description: "The markdown report written to the job summary."
     value: ${{ steps.run.outputs.report }}
+  custody_subjects:
+    description: "Number of changed dependencies Sato Check answered for (0 outside pull requests)."
+    value: ${{ steps.run.outputs.custody_subjects }}
+  key_egress_observed:
+    description: "true when Sato Check reports a planted key seen leaving for a changed dependency."
+    value: ${{ steps.run.outputs.key_egress_observed }}
 
 runs:
   using: "composite"
@@ -85,4 +103,7 @@ runs:
         INPUT_FAIL_ON: ${{ inputs.fail_on }}
         INPUT_ANNOTATIONS: ${{ inputs.annotations }}
         INPUT_API: ${{ inputs.api }}
+        INPUT_FAIL-ON: ${{ inputs.fail-on }}
+        INPUT_CUSTODY: ${{ inputs.custody }}
+        INPUT_GITHUB-TOKEN: ${{ inputs.github-token }}
       run: node "${{ github.action_path }}/src/main.mjs"

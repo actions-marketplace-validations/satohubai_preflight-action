@@ -20,6 +20,7 @@
 
 import { readFileSync, existsSync, appendFileSync, writeFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
+import { runCustody } from "./custody.mjs";
 
 const TIMEOUT_MS = 60_000;
 const CAVEAT =
@@ -141,11 +142,18 @@ function plainTable(results) {
 
 // ---------- main ----------
 
-async function main() {
+// fail_on is a comma list: one Preflight level (no | caution | none) plus, since
+// v1.1, the custody opt-in `key_egress_observed`. `fail-on` is accepted as an alias.
+function failOnList() {
+  return `${input("fail_on", "")},${input("fail-on", "")}`.toLowerCase().split(/[\s,]+/).filter(Boolean);
+}
+
+async function preflight() {
   const api = input("api", "https://satohub.ai");
-  const failOn = (input("fail_on", "no") || "no").toLowerCase();
+  const levels = failOnList().filter((v) => v !== "key_egress_observed");
+  const failOn = levels[0] || "no";
   if (!["no", "caution", "none"].includes(failOn)) {
-    warn(`fail_on must be no, caution or none; got "${failOn}". Using "no".`);
+    warn(`fail_on must be no, caution or none (plus optionally key_egress_observed); got "${failOn}". Using "no".`);
   }
   const manifest = readManifest();
   const body = {
@@ -268,6 +276,21 @@ async function main() {
   }
   if (summary.unknown) notice(`${summary.unknown} target(s) are not in the Sato Hub index. That is a gap in our records, not a finding about your dependencies.`);
   return 0;
+}
+
+async function main() {
+  const code = await preflight();
+  if (!boolInput("custody", true)) return code;
+  const custody = await runCustody({
+    api: input("api", "https://satohub.ai"),
+    failOn: failOnList(),
+    token: input("github-token", ""),
+    io: { summary: writeSummary },
+  });
+  if (custody.skipped) console.log(`Sato Check diff mode skipped: ${custody.skipped}.`);
+  setOutput("custody_subjects", custody.subjects ?? 0);
+  setOutput("key_egress_observed", custody.egress ? "true" : "false");
+  return code || custody.code;
 }
 
 main()
