@@ -13,7 +13,10 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 
-export const UA = "satohub-preflight-action/1.1";
+// SATO_CHECK_UA lets Sato Hub's own CI identify itself, so it is not counted as outside use.
+export const UA = process.env.SATO_CHECK_UA || "satohub-preflight-action/1.2";
+export const POLICY_PATH = ".sato/policy.json";
+export const PROFILE_CONCURRENCY = 4;
 export const TIMEOUT_MS = 30_000;
 export const MARKER = "<!-- sato-check:preflight-action -->";
 export const MAX_COMMAND_BYTES = 15_000;
@@ -128,7 +131,7 @@ export function subjectName(sub) {
 }
 
 /** Markdown for the job summary and the PR comment. */
-export function renderReport(res, { changes = [], api = "https://satohub.ai", error = null, localSkills = 0 } = {}) {
+export function renderReport(res, { changes = [], api = "https://satohub.ai", error = null, localSkills = 0, policy = null } = {}) {
   const base = api.replace(/\/$/, "");
   const out = [MARKER, "## Sato Check — dependencies changed in this PR", ""];
   if (changes.length) {
@@ -158,6 +161,7 @@ export function renderReport(res, { changes = [], api = "https://satohub.ai", er
       out.push(`_Not checked: ${res.unresolved.map((u) => `\`${cell(u.input)}\` (${cell(u.reason)})`).join(", ")}_`, "");
     }
   }
+  out.push(...renderPolicy(policy));
   if (localSkills) out.push(`_${localSkills} skill file(s) in this repo changed. A local SKILL.md is not a registry install, so Sato Check has no record to read for it — review it in the diff._`, "");
   out.push(`> ${DISCLAIMER}`, "", `[Sato Check](${base}/check)`);
   return out.join("\n");
@@ -175,6 +179,160 @@ export function changeLines({ packages = [], servers = {}, skills = [] }) {
 /** Exit decision: only an observed egress with the opt-in fails. */
 export function shouldFail(res, failOnList) {
   return failOnList.includes("key_egress_observed") && res?.has_observed_key_egress === true;
+}
+
+
+// ---------- team policy (.sato/policy.json, v1.2) ----------
+// Mirrors lib/custody/policy.ts on Sato Hub (the action cannot import the app).
+// A policy names which custody FACTS a team wants a build stopped for. A match
+// is reported by the rule that matched and its evidence; `unknown` never matches.
+
+export const POLICY_RULES = ["key_egress_observed", "undeclared_key_read", "unlimited_fund_action", "install_script_added", "new_host"];
+export const RULE_TEXT = {
+  key_egress_observed: "a planted test key was seen leaving during a run",
+  undeclared_key_read: "code reads key material and the setup does not ask for a key",
+  unlimited_fund_action: "a fund-moving action with no configurable limit found",
+  install_script_added: "this version adds an install script",
+  new_host: "this version adds a request to a host not in allow_hosts",
+};
+
+const strList = (v, name) => {
+  if (v == null) return [];
+  if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) return { error: `\`${name}\` must be an array of strings.` };
+  return v.map((s) => s.trim()).filter(Boolean).slice(0, 500);
+};
+
+/** Validate a policy object. Returns {ok, policy} | {ok:false, error}. */
+export function parsePolicy(input) {
+  if (input == null || typeof input !== "object" || Array.isArray(input)) return { ok: false, error: "the policy must be a JSON object" };
+  if (input.version !== undefined && input.version !== 1) return { ok: false, error: "only policy `version: 1` is understood" };
+  const fail = input.fail_on === undefined ? ["key_egress_observed"] : strList(input.fail_on, "fail_on");
+  if (!Array.isArray(fail)) return { ok: false, error: fail.error };
+  for (const r of fail) if (!POLICY_RULES.includes(r)) return { ok: false, error: `unknown rule "${r}" (rules: ${POLICY_RULES.join(", ")})` };
+  const hosts = strList(input.allow_hosts, "allow_hosts");
+  if (!Array.isArray(hosts)) return { ok: false, error: hosts.error };
+  const subjects = strList(input.allow_subjects, "allow_subjects");
+  if (!Array.isArray(subjects)) return { ok: false, error: subjects.error };
+  return {
+    ok: true,
+    policy: {
+      version: 1,
+      fail_on: POLICY_RULES.filter((r) => fail.includes(r)),
+      ...(hosts.length ? { allow_hosts: hosts.map((h) => h.toLowerCase()) } : {}),
+      ...(subjects.length ? { allow_subjects: subjects } : {}),
+    },
+  };
+}
+
+/** Read .sato/policy.json. {policy:null} when absent; {policy:null, error} when unreadable. */
+export function readPolicy(readFile = (p) => (existsSync(p) ? readFileSync(p, "utf8") : null), path = POLICY_PATH) {
+  let text;
+  try { text = readFile(path); } catch (e) { return { policy: null, error: `could not read ${path} (${e?.message || e})` }; }
+  if (text == null || text === "") return { policy: null };
+  let json;
+  try { json = JSON.parse(text); } catch { return { policy: null, error: `${path} is not valid JSON` }; }
+  const r = parsePolicy(json);
+  return r.ok ? { policy: r.policy } : { policy: null, error: `${path}: ${r.error}` };
+}
+
+function hostAllowed(host, allow) {
+  const h = String(host).toLowerCase();
+  return (allow || []).some((a) => (a.startsWith("*.") ? h === a.slice(2) || h.endsWith(a.slice(1)) : h === a));
+}
+
+/** Which of the policy's rules this profile's readings match. Same semantics as the app. */
+export function evaluatePolicy(profile, policy) {
+  const on = new Set(policy.fail_on || []);
+  const v = [];
+  if (!profile || typeof profile !== "object") return { ok: true, violations: [] };
+  if ((policy.allow_subjects || []).includes(profile.subject?.id)) return { ok: true, violations: [] };
+  const evidence = Array.isArray(profile.evidence) ? profile.evidence : [];
+  if (on.has("key_egress_observed") && profile.key_egress === "observed") {
+    v.push({ rule: "key_egress_observed", detail: `A planted test key was sent to ${(profile.key_egress_hosts || []).join(", ") || "an outside host"}.`, evidence_rule: "O-canary-egress" });
+  }
+  if (on.has("undeclared_key_read") && profile.key_access === "reads" && !evidence.some((e) => e.rule === "D-env-key")) {
+    const read = evidence.find((e) => e.rule === "T-key-read");
+    v.push({ rule: "undeclared_key_read", detail: `Code reads key material and the setup does not ask for a key${read ? ` (${read.source})` : ""}.`, evidence_rule: read?.rule ?? "T-key-read" });
+  }
+  if (on.has("unlimited_fund_action") && Array.isArray(profile.fund_actions)) {
+    for (const a of profile.fund_actions.filter((a) => a.limit_configurable === false)) {
+      v.push({ rule: "unlimited_fund_action", detail: `${a.name} (${a.action}) — no configurable limit found.`, evidence_rule: a.evidence_class === "declared" ? "D-fund-tool" : "N-unlimited-fund-action" });
+    }
+  }
+  const items = Array.isArray(profile.changes?.items) ? profile.changes.items : [];
+  if (on.has("install_script_added")) {
+    for (const c of items.filter((c) => c.kind === "install_script_added")) v.push({ rule: "install_script_added", detail: c.detail, evidence_rule: "T-install-script" });
+  }
+  if (on.has("new_host")) {
+    for (const c of items.filter((c) => c.kind === "host_added")) {
+      const host = String(c.detail || "").replace(/^adds a request to /, "").trim();
+      if (hostAllowed(host, policy.allow_hosts)) continue;
+      const h = (profile.hosts || []).find((x) => x.host === host);
+      v.push({ rule: "new_host", detail: c.detail, evidence_rule: h?.evidence_class === "observed" ? "O-hosts" : "T-hosts" });
+    }
+  }
+  return { ok: v.length === 0, violations: v };
+}
+
+/** GET /api/check?target=<id> → the full profile. Throws on anything but a 200 with a profile. */
+export async function fetchProfile(api, id, fetchFn = fetch) {
+  const res = await fetchFn(`${api.replace(/\/$/, "")}/api/check?target=${encodeURIComponent(id)}`, {
+    headers: { "user-agent": UA, accept: "application/json" },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  const json = await res.json().catch(() => null);
+  if (res.status !== 200 || !json?.profile) throw new Error(json?.error || `HTTP ${res.status}`);
+  return json.profile;
+}
+
+/**
+ * Evaluate every subject the install check answered for against the policy.
+ * The install response carries summaries only, so each profile is read from
+ * GET /api/check (4 at a time). A read that fails is "could not evaluate" —
+ * never a match.
+ */
+export async function evaluateSubjects(subjects, policy, { api, fetchFn = fetch, concurrency = PROFILE_CONCURRENCY } = {}) {
+  const violations = [];
+  const unevaluated = [];
+  const list = (subjects || []).filter((s) => s?.subject?.id && !(policy.allow_subjects || []).includes(s.subject.id));
+  let next = 0;
+  const worker = async () => {
+    while (next < list.length) {
+      const s = list[next++];
+      try {
+        const profile = await fetchProfile(api, s.subject.id, fetchFn);
+        for (const v of evaluatePolicy(profile, policy).violations) violations.push({ subject: subjectName(s), id: s.subject.id, ...v });
+      } catch (e) {
+        unevaluated.push({ subject: subjectName(s), reason: e?.message || String(e) });
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, list.length) }, worker));
+  const order = (x) => list.findIndex((s) => s.subject.id === x.id);
+  violations.sort((a, b) => order(a) - order(b));
+  return { violations, unevaluated };
+}
+
+/** Markdown section for the policy outcome. */
+export function renderPolicy(policyOut) {
+  if (!policyOut) return [];
+  const out = ["**Team policy (`.sato/policy.json`)**", ""];
+  if (policyOut.error) {
+    out.push(`_The policy file could not be used: ${cell(policyOut.error)}. No policy rule was applied; the build is not failed over it._`, "");
+    return out;
+  }
+  out.push(`Rules on: ${policyOut.policy.fail_on.map((r) => `\`${r}\``).join(", ") || "none"}.`, "");
+  if (policyOut.violations.length) {
+    out.push("| dependency | rule matched | what the reading says | evidence |", "|---|---|---|---|");
+    for (const v of policyOut.violations) out.push(`| \`${cell(v.subject)}\` | \`${v.rule}\` — ${RULE_TEXT[v.rule]} | ${cell(v.detail)} | \`${v.evidence_rule}\` |`);
+    out.push("");
+  } else {
+    out.push("_No reading matched a rule in the policy. An `unknown` answer never matches._", "");
+  }
+  if (policyOut.unevaluated.length) {
+    out.push(`_Could not evaluate (not a match): ${policyOut.unevaluated.map((u) => `\`${cell(u.subject)}\` (${cell(u.reason)})`).join(", ")}_`, "");
+  }
+  return out;
 }
 
 // ---------- I/O ----------
@@ -269,7 +427,16 @@ export async function runCustody({ api, failOn = [], token = "", env = process.e
     error = e?.message || String(e);
     log(`::warning::Sato Check was unreachable or refused (${error}). Reported as unknown; not failing the build.`);
   }
-  const report = renderReport(res, { changes, api, error, localSkills: found.skills.length });
+  let policyOut = null;
+  const pol = (io.readPolicy || readPolicy)();
+  if (pol.error) {
+    policyOut = { error: pol.error };
+    log(`::warning::Sato Check: ${pol.error}. No policy rule applied; not failing the build over it.`);
+  } else if (pol.policy) {
+    const ev = res ? await evaluateSubjects(res.subjects, pol.policy, { api, fetchFn }) : { violations: [], unevaluated: [] };
+    policyOut = { policy: pol.policy, ...ev };
+  }
+  const report = renderReport(res, { changes, api, error, localSkills: found.skills.length, policy: policyOut });
   summary(report);
 
   if (token) {
@@ -286,6 +453,10 @@ export async function runCustody({ api, failOn = [], token = "", env = process.e
   }
 
   const egress = res?.has_observed_key_egress === true;
+  if (policyOut?.violations?.length) {
+    for (const v of policyOut.violations) log(`::error::Sato Check policy: ${v.subject} matched \`${v.rule}\` (${RULE_TEXT[v.rule]}): ${v.detail}`);
+    return { code: 1, report, subjects: res?.subjects?.length ?? 0, egress, violations: policyOut.violations.length };
+  }
   if (shouldFail(res, failOn)) {
     log("::error::Sato Check: a planted key was seen leaving during a run for a dependency this PR adds or changes, and fail_on includes key_egress_observed. See the job summary for the host.");
     return { code: 1, report, subjects: res?.subjects?.length ?? 0, egress };

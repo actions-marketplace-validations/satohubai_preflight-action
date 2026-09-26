@@ -290,6 +290,7 @@ async function main() {
   if (custody.skipped) console.log(`Sato Check diff mode skipped: ${custody.skipped}.`);
   setOutput("custody_subjects", custody.subjects ?? 0);
   setOutput("key_egress_observed", custody.egress ? "true" : "false");
+  setOutput("policy_violations", custody.violations ?? 0);
   return code || custody.code;
 }
 

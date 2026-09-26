@@ -107,6 +107,45 @@ jobs:
 Up to **50 targets** per run. Over the cap the API refuses rather than
 truncating — a clean summary over a silent subset would be believed.
 
+## Team policy — `.sato/policy.json` (v1.2.0)
+
+Commit a `.sato/policy.json` to the repository being checked and the diff mode
+above also evaluates each changed dependency's Sato Check readings against it.
+The job fails **only when a reading matches a rule you switched on**; every match
+is listed in the job summary and the PR comment with the rule, what the reading
+says and the evidence rule id behind it.
+
+```json
+{
+  "version": 1,
+  "fail_on": ["key_egress_observed", "undeclared_key_read", "unlimited_fund_action", "install_script_added", "new_host"],
+  "allow_hosts": ["*.base.org", "api.coingecko.com"],
+  "allow_subjects": ["npm:@acme/wallet"]
+}
+```
+
+| rule | matches when |
+|---|---|
+| `key_egress_observed` | a planted test key was seen leaving during one of Sato Hub's runs |
+| `undeclared_key_read` | code reads key material and the setup does not ask for a key |
+| `unlimited_fund_action` | a fund-moving action has no configurable limit found |
+| `install_script_added` | this version adds an install script |
+| `new_host` | this version adds a request to a host not in `allow_hosts` (exact host or `*.suffix`) |
+
+`allow_subjects` exempts a subject id from every rule. `fail_on` defaults to
+`["key_egress_observed"]` when omitted.
+
+- **`unknown` never matches a rule.** No reading is not a finding.
+- The install check returns summaries, so the action reads each subject's full
+  profile from `GET /api/check?target=<id>` (four at a time, 30 s timeout). A read
+  that fails is reported as *could not evaluate* — never a match.
+- An invalid policy file is reported and ignored; it never fails the build.
+- No policy file → the v1.1 behaviour: only `fail_on` (input) decides.
+- New output: `policy_violations` (count of matches).
+
+A match names a fact your team asked to be stopped for. It is not a rating of
+the dependency.
+
 ## Outputs
 
 `verdict` (the most severe seen) · `go` · `caution` · `no` · `unknown` ·
