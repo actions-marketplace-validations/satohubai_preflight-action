@@ -87,6 +87,9 @@ outputs:
   key_egress_observed:
     description: "true when Sato Check reports a planted key seen leaving for a changed dependency."
     value: ${{ steps.run.outputs.key_egress_observed }}
+  policy_violations:
+    description: "Number of readings that matched a rule in the repository's .sato/policy.json (0 without a policy file)."
+    value: ${{ steps.run.outputs.policy_violations }}
 
 runs:
   using: "composite"
