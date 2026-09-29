@@ -58,7 +58,7 @@ jobs:
           echo "explicit          → verdict=${{ steps.explicit.outputs.verdict }} total=${{ steps.explicit.outputs.total }}"
 
       - name: Offline tests (Sato Check diff mode)
-        run: node --test test/custody.test.mjs
+        run: node --test test/custody.test.mjs test/policy.test.mjs test/drift.test.mjs
 
       - name: Assertions against the live endpoint
         run: node test/run.mjs

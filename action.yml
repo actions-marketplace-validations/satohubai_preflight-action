@@ -7,6 +7,14 @@ branding:
   color: "green"
 
 inputs:
+  mode:
+    description: "preflight (default) | template-drift. template-drift reads sato.create.json + sato.lock.json from the repo root and opens exactly one issue per material change, ever (needs `issues: write`). Without sato.create.json it exits 0 with a notice."
+    required: false
+    default: "preflight"
+  fail_on_error:
+    description: "template-drift only. true makes the step exit non-zero when the drift endpoint or the GitHub API cannot be reached. Default false."
+    required: false
+    default: "false"
   manifest:
     description: "Path to the dependency manifest to check. package.json or requirements.txt."
     required: false
@@ -87,6 +95,12 @@ outputs:
   key_egress_observed:
     description: "true when Sato Check reports a planted key seen leaving for a changed dependency."
     value: ${{ steps.run.outputs.key_egress_observed }}
+  drift_changes:
+    description: "template-drift only: number of material changes the drift endpoint reported."
+    value: ${{ steps.run.outputs.drift_changes }}
+  drift_opened:
+    description: "template-drift only: number of issues opened by this run."
+    value: ${{ steps.run.outputs.drift_opened }}
   policy_violations:
     description: "Number of readings that matched a rule in the repository's .sato/policy.json (0 without a policy file)."
     value: ${{ steps.run.outputs.policy_violations }}
@@ -97,6 +111,8 @@ runs:
     - id: run
       shell: bash
       env:
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_FAIL_ON_ERROR: ${{ inputs.fail_on_error }}
         INPUT_MANIFEST: ${{ inputs.manifest }}
         INPUT_MANIFEST-KIND: ${{ inputs.manifest-kind }}
         INPUT_PACKAGES: ${{ inputs.packages }}
