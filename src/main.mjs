@@ -21,6 +21,7 @@
 import { readFileSync, existsSync, appendFileSync, writeFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { runCustody, UA } from "./custody.mjs";
+import { runDrift } from "./drift.mjs";
 
 const TIMEOUT_MS = 60_000;
 const CAVEAT =
@@ -281,6 +282,19 @@ async function preflight() {
 }
 
 async function main() {
+  const mode = input("mode", "preflight").toLowerCase();
+  if (mode === "template-drift") {
+    const out = await runDrift({
+      api: input("api", "https://satohub.ai"),
+      token: input("github-token", ""),
+      failOnError: boolInput("fail_on_error", false),
+      io: { summary: writeSummary },
+    });
+    setOutput("drift_changes", out.changes?.length ?? 0);
+    setOutput("drift_opened", out.opened?.length ?? 0);
+    return out.code;
+  }
+  if (mode !== "preflight") warn(`Unknown mode "${mode}"; running the default preflight mode.`);
   const code = await preflight();
   if (!boolInput("custody", true)) return code;
   const custody = await runCustody({
