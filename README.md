@@ -265,6 +265,8 @@ where `findings` are SARIF `results` entries. Single targets:
 `?token=…&chain=…`. Full reference: <https://satohub.ai/preflight> ·
 methodology (every rule a verdict can cite): <https://satohub.ai/preflight/methodology>.
 
+Each call carries an `x-sato-repo: <owner>/<repo>` header (from `GITHUB_REPOSITORY`) that Sato Hub uses only to tell its own CI runs of this Action from yours; it stores a bare own/not-own flag, never the repo name.
+
 ## Licence
 
 MIT. Data from <https://satohub.ai>.
