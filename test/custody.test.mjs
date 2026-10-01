@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   classifyPath, changedPackages, changedServers, buildRequest, renderReport,
-  shouldFail, collect, runCustody, upsertComment, MARKER, UA,
+  shouldFail, collect, runCustody, upsertComment, MARKER, UA, repoHeader, postInstall, fetchProfile,
 } from "../src/custody.mjs";
 
 const BANNED = /\b(safe|safely|unsafe|secure|insecure|malicious|malware|scam|trusted|trustworthy|passed|risk-free|guaranteed)\b/i;
@@ -146,4 +146,26 @@ test("runCustody fails only on observed egress with opt-in", async () => {
 test("upsertComment reports a missing permission instead of throwing", async () => {
   const out = await upsertComment({ repo: "o/r", pr: 1, token: "t", body: "x", fetchFn: async () => ({ ok: false, status: 403 }) });
   assert.match(out, /HTTP 403/);
+});
+
+test("repoHeader: sends GITHUB_REPOSITORY as x-sato-repo, and nothing when it is absent or malformed", () => {
+  assert.deepEqual(repoHeader({ GITHUB_REPOSITORY: "acme/widgets" }), { "x-sato-repo": "acme/widgets" });
+  assert.deepEqual(repoHeader({ GITHUB_REPOSITORY: " satohubai/sato-agent-templates " }), { "x-sato-repo": "satohubai/sato-agent-templates" });
+  assert.deepEqual(repoHeader({}), {});
+  for (const bad of ["", "acme", "acme/", "a/b/c", "https://example.com/a/b", "a b/c"]) assert.deepEqual(repoHeader({ GITHUB_REPOSITORY: bad }), {}, bad);
+});
+
+test("every call to the Sato Hub API carries x-sato-repo (install check, profile read)", async () => {
+  const prev = process.env.GITHUB_REPOSITORY;
+  process.env.GITHUB_REPOSITORY = "acme/widgets";
+  try {
+    const seen = [];
+    const f = async (url, init) => { seen.push({ url, h: init.headers }); return { status: 200, json: async () => ({ profile: {} }) }; };
+    await postInstall("https://satohub.ai", {}, f);
+    await fetchProfile("https://satohub.ai", "npm:x", f);
+    assert.equal(seen.length, 2);
+    for (const c of seen) assert.equal(c.h["x-sato-repo"], "acme/widgets", c.url);
+  } finally {
+    if (prev === undefined) delete process.env.GITHUB_REPOSITORY; else process.env.GITHUB_REPOSITORY = prev;
+  }
 });

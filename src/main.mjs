@@ -20,7 +20,7 @@
 
 import { readFileSync, existsSync, appendFileSync, writeFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
-import { runCustody, UA } from "./custody.mjs";
+import { runCustody, UA, repoHeader } from "./custody.mjs";
 import { runDrift } from "./drift.mjs";
 
 const TIMEOUT_MS = 60_000;
@@ -108,7 +108,7 @@ async function callBatch(api, body) {
     method: "POST",
     // One user-agent for every call (custody.mjs UA): the published name by
     // default, SATO_CHECK_UA when Sato Hub's own CI runs the Action.
-    headers: { "content-type": "application/json", "user-agent": UA },
+    headers: { "content-type": "application/json", "user-agent": UA, ...repoHeader() },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
