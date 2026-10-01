@@ -15,6 +15,17 @@ import { readFileSync, existsSync } from "node:fs";
 
 // SATO_CHECK_UA lets Sato Hub's own CI identify itself, so it is not counted as outside use.
 export const UA = process.env.SATO_CHECK_UA || "satohub-preflight-action/1.2";
+
+/**
+ * `x-sato-repo: <owner>/<repo>` from GITHUB_REPOSITORY, sent on every call to the Sato Hub API.
+ * Sato Hub uses it for ONE thing: telling its own CI runs of this Action apart from yours, so
+ * your usage is never mislabelled as ours. The server keeps only an own/not-own flag, never the
+ * repo name. Nothing is sent outside GitHub Actions or when the value is not <owner>/<repo>.
+ */
+export function repoHeader(env = process.env) {
+  const r = String(env.GITHUB_REPOSITORY || "").trim();
+  return /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/.test(r) ? { "x-sato-repo": r } : {};
+}
 export const POLICY_PATH = ".sato/policy.json";
 export const PROFILE_CONCURRENCY = 4;
 export const TIMEOUT_MS = 30_000;
@@ -277,7 +288,7 @@ export function evaluatePolicy(profile, policy) {
 /** GET /api/check?target=<id> → the full profile. Throws on anything but a 200 with a profile. */
 export async function fetchProfile(api, id, fetchFn = fetch) {
   const res = await fetchFn(`${api.replace(/\/$/, "")}/api/check?target=${encodeURIComponent(id)}`, {
-    headers: { "user-agent": UA, accept: "application/json" },
+    headers: { "user-agent": UA, accept: "application/json", ...repoHeader() },
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   const json = await res.json().catch(() => null);
@@ -372,7 +383,7 @@ export function collect(files, before, readNow = (p) => (existsSync(p) ? readFil
 export async function postInstall(api, body, fetchFn = fetch) {
   const res = await fetchFn(`${api.replace(/\/$/, "")}/api/check/install`, {
     method: "POST",
-    headers: { "content-type": "application/json", "user-agent": UA },
+    headers: { "content-type": "application/json", "user-agent": UA, ...repoHeader() },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });

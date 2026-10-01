@@ -20,7 +20,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { UA } from "./custody.mjs";
+import { UA, repoHeader } from "./custody.mjs";
 
 export const DRIFT_TIMEOUT_MS = 30_000;
 export const DRIFT_LABEL = "sato-drift";
@@ -75,7 +75,7 @@ export function makeDriftClient({ api, fetchFn = fetch }) {
     async drift(create, lock) {
       const res = await fetchFn(`${api.replace(/\/$/, "")}/api/create/drift`, {
         method: "POST",
-        headers: { "content-type": "application/json", "user-agent": UA, accept: "application/json" },
+        headers: { "content-type": "application/json", "user-agent": UA, accept: "application/json", ...repoHeader() },
         body: JSON.stringify({ create, lock }),
         signal: AbortSignal.timeout(DRIFT_TIMEOUT_MS),
       });
