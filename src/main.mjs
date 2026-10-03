@@ -22,6 +22,7 @@ import { readFileSync, existsSync, appendFileSync, writeFileSync } from "node:fs
 import { resolve as resolvePath } from "node:path";
 import { runCustody, UA, repoHeader } from "./custody.mjs";
 import { runDrift } from "./drift.mjs";
+import { runTeam } from "./team.mjs";
 
 const TIMEOUT_MS = 60_000;
 const CAVEAT =
@@ -296,18 +297,27 @@ async function main() {
   }
   if (mode !== "preflight") warn(`Unknown mode "${mode}"; running the default preflight mode.`);
   const code = await preflight();
-  if (!boolInput("custody", true)) return code;
+  // Sato Check Team (v1.4): only with a Sato API key. No key, nothing is registered or stored for the repo.
+  const key = input("sato-api-key", "") || (process.env.SATO_API_KEY || "").trim();
+  const team = key
+    ? await runTeam({ api: input("api", "https://satohub.ai"), key, manifest: input("manifest", "package.json"), io: { summary: writeSummary } })
+    : { code: 0, skipped: "no key", registered: false, sarif: "", violations: 0 };
+  setOutput("team_repo_registered", team.registered ? "true" : "false");
+  setOutput("team_sarif", team.sarif || "");
+  if (!boolInput("custody", true)) return code || team.code;
   const custody = await runCustody({
     api: input("api", "https://satohub.ai"),
     failOn: failOnList(),
     token: input("github-token", ""),
     io: { summary: writeSummary },
+    // When the server evaluated the policy (org + repo, waivers applied) it is the one verdict.
+    skipPolicy: Boolean(key) && !team.skipped,
   });
   if (custody.skipped) console.log(`Sato Check diff mode skipped: ${custody.skipped}.`);
   setOutput("custody_subjects", custody.subjects ?? 0);
   setOutput("key_egress_observed", custody.egress ? "true" : "false");
-  setOutput("policy_violations", custody.violations ?? 0);
-  return code || custody.code;
+  setOutput("policy_violations", (custody.violations ?? 0) + (team.violations ?? 0));
+  return code || team.code || custody.code;
 }
 
 main()
