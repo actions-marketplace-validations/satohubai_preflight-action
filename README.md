@@ -188,10 +188,51 @@ or the GitHub API cannot be read, the step warns, opens nothing, and exits 0 —
 unless you set `fail_on_error: true`. Outputs: `drift_changes`, `drift_opened`.
 Only `create` and `lock` are sent; nothing else from the repository leaves it.
 
+## Sato Check Team — a key, an inventory, one policy (v1.4.0)
+
+Everything above is free and needs no key, in public and private repos alike.
+**Sato Check Team** is the plan for a team that wants it managed in one place.
+With a Sato API key the Action also:
+
+- **registers the repo** in your account's inventory (repo name, visibility and the
+  dependencies it named), so a change in what a dependency does with keys, hosts
+  or funds reaches your alert endpoints and receipt email;
+- **applies your org policy** on top of the repo's `.sato/policy.json`. A repo can
+  add rules and narrow the allow-lists; it cannot loosen the org's. Waivers carry a
+  reason and an expiry;
+- **records the run** in a history you can read at `satohub.ai/dashboard/check`;
+- **uploads the merged-policy SARIF** to GitHub code scanning.
+
+```yaml
+permissions:
+  contents: read
+  security-events: write   # only for the SARIF upload
+
+steps:
+  - uses: actions/checkout@v5
+  - uses: satohubai/preflight-action@v1
+    with:
+      sato-api-key: ${{ secrets.SATO_API_KEY }}
+```
+
+- **No key, no change.** Without `sato-api-key` (or `SATO_API_KEY`) nothing is
+  registered or stored for your repo and the Action behaves as before (the
+  `x-sato-repo` header above is only read as an own/not-own flag).
+- **It fails open.** An unreachable API, a rejected key, a plan without the feature
+  or a quota refusal is reported and never fails the build. The only thing that can
+  is a policy rule your own team wrote matching a reading.
+- **What is stored, and how to remove it.** Repo name, visibility, the dependency
+  names and a record of each run, for keyed callers on a Sato Check Team plan only.
+  Delete a repo, and its history with it, at `satohub.ai/dashboard/check`.
+- **Private repos** are checked the same way. The visibility header comes from the
+  workflow's event payload.
+- Reads `package.json` manifests in this release.
+
 ## Outputs
 
 `verdict` (the most severe seen) · `go` · `caution` · `no` · `unknown` ·
-`total` · `sarif` (path to a SARIF 2.1 log) · `report` (the markdown).
+`total` · `sarif` (path to a SARIF 2.1 log) · `report` (the markdown) ·
+`team_repo_registered` · `team_sarif` (Sato Check Team mode).
 
 ---
 
