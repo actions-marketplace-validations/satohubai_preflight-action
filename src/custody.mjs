@@ -14,7 +14,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 
 // SATO_CHECK_UA lets Sato Hub's own CI identify itself, so it is not counted as outside use.
-export const UA = process.env.SATO_CHECK_UA || "satohub-preflight-action/1.2";
+export const UA = process.env.SATO_CHECK_UA || "satohub-preflight-action/1.4";
 
 /**
  * `x-sato-repo: <owner>/<repo>` from GITHUB_REPOSITORY, sent on every call to the Sato Hub API.
@@ -409,7 +409,7 @@ export async function upsertComment({ repo, pr, token, body, fetchFn = fetch, ap
  * Runs diff mode. Never throws. Returns { code, report, subjects, egress }.
  * `io` lets tests inject git/fetch/env.
  */
-export async function runCustody({ api, failOn = [], token = "", env = process.env, io = {} } = {}) {
+export async function runCustody({ api, failOn = [], token = "", env = process.env, io = {}, skipPolicy = false } = {}) {
   const log = io.log || console.log;
   const fetchFn = io.fetch || fetch;
   const summary = io.summary || (() => {});
@@ -439,7 +439,9 @@ export async function runCustody({ api, failOn = [], token = "", env = process.e
     log(`::warning::Sato Check was unreachable or refused (${error}). Reported as unknown; not failing the build.`);
   }
   let policyOut = null;
-  const pol = (io.readPolicy || readPolicy)();
+  // Sato Check Team mode (src/team.mjs) evaluates the policy on the server, after the
+  // org policy is merged in, so this client-side pass is skipped to avoid reporting it twice.
+  const pol = skipPolicy ? { policy: null } : (io.readPolicy || readPolicy)();
   if (pol.error) {
     policyOut = { error: pol.error };
     log(`::warning::Sato Check: ${pol.error}. No policy rule applied; not failing the build over it.`);
